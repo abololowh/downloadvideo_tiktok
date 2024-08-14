@@ -3,6 +3,8 @@ from telegram.ext import *
 import yt_dlp
 import os
 import json
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 API_KEY = '7257917415:AAFiG2hzhrn8zvhf3VCfPCepi9Xcq6BiJ7M'
 USER_DATA_FILE = 'users.json'
@@ -33,14 +35,16 @@ async def download_video(url: str) -> str:
         'outtmpl': 'video.%(ext)s',
     }
     
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info_dict = ydl.extract_info(url, download=False)
-            if info_dict:
-                ydl.download([url])
-                return 'video.mp4'
-    except yt_dlp.utils.DownloadError:
-        return None
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor() as pool:
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info_dict = await loop.run_in_executor(pool, lambda: ydl.extract_info(url, download=False))
+                if info_dict:
+                    await loop.run_in_executor(pool, lambda: ydl.download([url]))
+                    return 'video.mp4'
+        except yt_dlp.utils.DownloadError:
+            return None
 
 # Handle incoming messages
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -82,29 +86,4 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id == ADMIN_USER_ID:  # Ensure only admin can send broadcast
         if len(update.message.text.split(' ', 1)) > 1:
             message = update.message.text.split(' ', 1)[1]  # Get the message text after the command
-            users = load_users()
-            for user_id in users:
-                try:
-                    await context.bot.send_message(chat_id=user_id, text=message)
-                except Exception as e:
-                    print(f"Failed to send message to {user_id}: {e}")
-        else:
-            await update.message.reply_text("يرجى إدخال رسالة لإرسالها.")
-    else:
-        await update.message.reply_text("ليس لديك صلاحية استخدام هذا الأمر.")
 
-if __name__ == '__main__':
-    application = ApplicationBuilder().token(API_KEY).build()
-
-    # Handlers
-    text_handler = MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
-    user_count_handler = CommandHandler('user_count', get_user_count)
-    start_handler = CommandHandler('start', start)
-    broadcast_handler = CommandHandler('broadcast', broadcast)
-
-    application.add_handler(text_handler)
-    application.add_handler(user_count_handler)
-    application.add_handler(start_handler)
-    application.add_handler(broadcast_handler)
-
-    application.run_polling()
